@@ -1,0 +1,210 @@
+import tkinter as tk
+from tkinter import messagebox
+import sqlite3
+
+# Configurar base de datos
+conn = sqlite3.connect("risk_game.db")
+cursor = conn.cursor()
+cursor.execute("""
+CREATE TABLE IF NOT EXISTS tropas (
+    tipo TEXT PRIMARY KEY,
+    fuerza INTEGER,
+    costo INTEGER
+)
+""")
+cursor.execute("""
+CREATE TABLE IF NOT EXISTS territorios (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    nombre TEXT,
+    defensa INTEGER
+)
+""")
+conn.commit()
+
+# Insertar datos iniciales si no existen
+cursor.execute("SELECT COUNT(*) FROM tropas")
+if cursor.fetchone()[0] == 0:
+    cursor.executemany("INSERT INTO tropas (tipo, fuerza, costo) VALUES (?, ?, ?)", [
+        ("infanteria", 1, 1),
+        ("caballeria", 3, 3),
+        ("artilleria", 5, 5)
+    ])
+
+cursor.execute("SELECT COUNT(*) FROM territorios")
+if cursor.fetchone()[0] == 0:
+    cursor.executemany("INSERT INTO territorios (nombre, defensa) VALUES (?, ?)", [
+        ("Territorio 1", 10),
+        ("Territorio 2", 15),
+        ("Territorio 3", 12)
+    ])
+conn.commit()
+
+# Clase del juego
+class RiskApp:
+    def __init__(self, root):
+        self.root = root
+        self.root.title("Juego Risk")
+        self.root.geometry("1024x768")
+        self.root.configure(bg="darkslategray")
+
+        # Estado del juego
+        self.tropas_seleccionadas = {"infanteria(1)": 0, "caballeria(3)": 0, "artilleria(5)": 0}
+        self.orden_ataque = []
+        self.puntos_disponibles = 20
+
+        # Crear menú principal
+        self.crear_menu_principal()
+
+    def crear_menu_principal(self):
+        frame = tk.Frame(self.root, bg="darkslategray")
+        frame.pack(fill="both", expand=True)
+
+        tk.Label(frame, text="BIENVENIDO A RISK", font=("Arial", 24, "bold"), fg="white", bg="darkslategray").pack(pady=20)
+        tk.Button(frame, text="Editar Tropas", font=("Arial", 14), command=self.abrir_editar_tropas, bg="gold").pack(pady=10)
+        tk.Button(frame, text="Editar Orden de Ataque", font=("Arial", 14), command=self.abrir_editar_orden, bg="gold").pack(pady=10)
+        tk.Button(frame, text="Atacar", font=("Arial", 14), command=self.abrir_menu_ataque, bg="gold").pack(pady=10)
+        tk.Button(frame, text="Salir", font=("Arial", 14), command=self.root.quit, bg="red").pack(pady=10)
+
+    def abrir_editar_tropas(self):
+        self.limpiar_pantalla()
+
+        frame = tk.Frame(self.root, bg="darkslategray")
+        frame.pack(fill="both", expand=True)
+
+        tk.Label(frame, text="Editar Tropas", font=("Arial", 20, "bold"), fg="white", bg="darkslategray").pack(pady=20)
+
+        self.tropas_entries = {}
+        self.total_puntos_label = tk.Label(frame, text=f"Puntos disponibles: {self.puntos_disponibles}", font=("Arial", 14), fg="white", bg="darkslategray")
+        self.total_puntos_label.pack()
+
+        for tipo_mostrado, tipo_real in [("infanteria(1)", "infanteria"), ("caballeria(3)", "caballeria"), ("artilleria(5)", "artilleria")]:
+            sub_frame = tk.Frame(frame, bg="darkslategray")
+            sub_frame.pack(pady=5)
+
+            tk.Label(sub_frame, text=f"{tipo_mostrado.capitalize()}: ", font=("Arial", 14), fg="white", bg="darkslategray").pack(side=tk.LEFT)
+            entry = tk.Entry(sub_frame, width=5, font=("Arial", 14))
+            entry.insert(0, "0")
+            entry.pack(side=tk.LEFT)
+            self.tropas_entries[tipo_real] = entry
+
+        tk.Button(frame, text="Confirmar", font=("Arial", 14), command=self.confirmar_tropas, bg="gold").pack(pady=10)
+        tk.Button(frame, text="Volver al Menú Principal", font=("Arial", 14), command=self.crear_menu_principal, bg="grey").pack(pady=10)
+
+    def confirmar_tropas(self):
+        puntos_gastados = 0
+        nuevas_tropas = {}
+
+        try:
+            for tipo, entry in self.tropas_entries.items():
+                cantidad = int(entry.get())
+                if cantidad < 0:
+                    raise ValueError("No se permiten cantidades negativas.")
+                cursor.execute("SELECT costo FROM tropas WHERE tipo = ?", (tipo,))
+                resultado = cursor.fetchone()
+                if not resultado:
+                    raise ValueError(f"El tipo de tropa '{tipo}' no existe en la base de datos.")
+                costo = resultado[0]
+                puntos_gastados += cantidad * costo
+                nuevas_tropas[tipo] = cantidad
+
+            if puntos_gastados > self.puntos_disponibles:
+                raise ValueError("Puntos insuficientes para la combinación seleccionada.")
+
+            self.tropas_seleccionadas = nuevas_tropas
+            self.puntos_disponibles -= puntos_gastados
+            self.total_puntos_label.config(text=f"Puntos disponibles: {self.puntos_disponibles}")
+            messagebox.showinfo("Tropas Confirmadas", f"Tus tropas: {self.tropas_seleccionadas}")
+        except ValueError as e:
+            messagebox.showerror("Error", str(e))
+        except Exception as e:
+            messagebox.showerror("Error", f"Ocurrió un error inesperado: {e}")
+
+    def abrir_editar_orden(self):
+        self.limpiar_pantalla()
+
+        frame = tk.Frame(self.root, bg="darkslategray")
+        frame.pack(fill="both", expand=True)
+
+        tk.Label(frame, text="Editar Orden de Ataque", font=("Arial", 20, "bold"), fg="white", bg="darkslategray").pack(pady=20)
+
+        self.orden_entries = []
+        cursor.execute("SELECT nombre FROM territorios")
+        territorios = cursor.fetchall()
+
+        for i, territorio in enumerate(territorios):
+            sub_frame = tk.Frame(frame, bg="darkslategray")
+            sub_frame.pack(pady=5)
+
+            tk.Label(sub_frame, text=f"Posición {i + 1}: ", font=("Arial", 14), fg="white", bg="darkslategray").pack(side=tk.LEFT)
+            entry = tk.Entry(sub_frame, width=5, font=("Arial", 14))
+            entry.insert(0, str(i + 1))
+            entry.pack(side=tk.LEFT)
+            self.orden_entries.append(entry)
+
+        tk.Button(frame, text="Confirmar", font=("Arial", 14), command=self.confirmar_orden, bg="gold").pack(pady=10)
+        tk.Button(frame, text="Volver al Menú Principal", font=("Arial", 14), command=self.crear_menu_principal, bg="grey").pack(pady=10)
+
+    def confirmar_orden(self):
+        try:
+            orden = [int(entry.get()) for entry in self.orden_entries]
+            if len(orden) != len(set(orden)) or any(o < 1 or o > len(self.orden_entries) for o in orden):
+                raise ValueError("El orden debe ser único y dentro del rango permitido.")
+
+            self.orden_ataque = orden
+            messagebox.showinfo("Orden Confirmada", f"Orden de ataque: {self.orden_ataque}")
+        except ValueError as e:
+            messagebox.showerror("Error", str(e))
+        except Exception as e:
+            messagebox.showerror("Error", f"Ocurrió un error inesperado: {e}")
+
+    def abrir_menu_ataque(self):
+        self.limpiar_pantalla()
+
+        frame = tk.Frame(self.root, bg="darkslategray")
+        frame.pack(fill="both", expand=True)
+
+        tk.Label(frame, text="Resultados del Ataque", font=("Arial", 20, "bold"), fg="white", bg="darkslategray").pack(pady=20)
+
+        tk.Button(frame, text="Realizar Ataque", font=("Arial", 14), command=self.realizar_ataque, bg="gold").pack(pady=10)
+        tk.Button(frame, text="Volver al Menú Principal", font=("Arial", 14), command=self.crear_menu_principal, bg="grey").pack(pady=10)
+
+    def realizar_ataque(self):
+        if sum(self.tropas_seleccionadas.values()) == 0:
+            messagebox.showerror("Error", "Debes asignar tropas antes de atacar.")
+            return
+
+        if not self.orden_ataque:
+            messagebox.showerror("Error", "Debes asignar un orden de ataque antes de atacar.")
+            return
+
+        cursor.execute("SELECT nombre, defensa FROM territorios")
+        territorios = cursor.fetchall()
+
+        resultados = self.calcular_resultados_ataque(territorios)
+        result_text = "\n".join(resultados)
+        messagebox.showinfo("Resultados del Ataque", result_text)
+
+    def calcular_resultados_ataque(self, territorios):
+        fuerza_total = sum(self.tropas_seleccionadas[tipo] * cursor.execute("SELECT fuerza FROM tropas WHERE tipo = ?", (tipo,)).fetchone()[0] for tipo in self.tropas_seleccionadas)
+        resultados = []
+
+        for id_territorio in self.orden_ataque:
+            territorio = territorios[id_territorio - 1]
+            if fuerza_total >= territorio[1]:
+                resultados.append(f"Conquistaste {territorio[0]} (Defensa: {territorio[1]}).")
+                fuerza_total -= territorio[1]
+            else:
+                resultados.append(f"No pudiste conquistar {territorio[0]} (Defensa: {territorio[1]}). Fin del ataque.")
+                break
+
+        return resultados
+
+    def limpiar_pantalla(self):
+        for widget in self.root.winfo_children():
+            widget.destroy()
+
+if __name__ == "__main__":
+    root = tk.Tk()
+    app = RiskApp(root)
+    root.mainloop()
+    conn.close()
